@@ -37,8 +37,7 @@ __device__ int positive_modulo(int i, int n) {
 }
 
 __device__ int mod_2_inverse(int a) {
-  if (a & 0x00000001) return 1;
-  return -1; 
+  return ((a & 0x00000001) << 1) - 1; // Output: -1 if error
 }
 
 __device__ int mod_3_inverse(int a) {
