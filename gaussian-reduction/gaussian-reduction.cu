@@ -35,7 +35,7 @@ __device__ int positive_modulo(int i, int n) {
   return (i % n + n) % n;
 }
 
-__device__ int mod_p_inverse(int p, int a) {
+__device__ int mod_p_inverse(int p, int a) { // TODO: implement a decent routine
   /*
     Mod p multiplicative inverse
     Output: r = a^{-1}
