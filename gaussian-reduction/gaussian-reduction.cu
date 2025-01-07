@@ -35,24 +35,54 @@ __device__ int positive_modulo(int i, int n) {
   return (i % n + n) % n;
 }
 
-__device__ int mod_p_inverse(int p, int a) { // TODO: implement a decent routine
-  /*
-    Mod p multiplicative inverse
-    Output: r = a^{-1}
-  */
-  int r = -1;
+__device__ int mod_2_inverse(int a) {
+  if (a & 0x00000001) return 1;
+  return -1; 
+}
 
-  if (a == 0) {
+__device__ int mod_3_inverse(int a) {
+  int b = a % 3;
+  if (b == 0) return -1;
+  return b;
+}
+
+__device__ int mod_p_inverse(int p, int a) {
+  /*
+    Extended Euclidean division
+    Mod p multiplicative inverse
+    Output: x_1 = a^{-1}
+  */
+  int u = a;
+  int v = p;
+  
+  if (p == 2)
+    return mod_2_inverse(a);
+
+  if (p == 3)
+    return mod_3_inverse(a);
+
+  if (u % v == 0) {
     return -1;
   }
 
-  for (int i = 1; i <= p - 1; i++) {
-    if ((i * a) % p == 1) {
-      r = i;
-    }
+  u = positive_modulo(a, p);
+  
+  int x_1 = 1;
+  int x_2 = 0;
+  
+  while (u != 1) {
+    int q = v/u;
+    int r = v - q*u;
+    int x = x_2 - q*x_1;
+
+    v = u;
+    u = r;
+    
+    x_2 = x_1;
+    x_1 = x;
   }
 
-  return r;
+  return positive_modulo(x_1, p);
 }
 
 __global__ void mod_p_gaussian_clean_column(GaussianEliminationCtx *ctx, int *A, int n_rows, int n_cols, int curr_col) {
