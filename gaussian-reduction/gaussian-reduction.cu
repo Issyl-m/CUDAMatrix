@@ -23,6 +23,7 @@ struct GaussianEliminationCtx {
   int mod_p_pivot_seek_from_row;
   int mod_p_curr_col;
   int mod_p_row_to_push;
+  int mod_p_pivot_val;
 };
 
 // Kernels and devices
@@ -106,18 +107,15 @@ __global__ void mod_p_gaussian_elimination(GaussianEliminationCtx *ctx, int *A, 
     return;
   }
  
-  int mod_p_inv = mod_p_inverse((*ctx).prime_number, A[((*ctx).mod_p_pivot_seek_from_row-1)*n_cols + curr_col]);
-
-  if ((signed int)mod_p_inv > -1) { // curr_col = curr_col + 1. Ensure to remove the (curr_row*n_cols + curr_col)-garbage
-    A[curr_row*n_cols + curr_col + x] -=\
-      (A[curr_row*n_cols + curr_col] * A[((*ctx).mod_p_pivot_seek_from_row-1)*n_cols + curr_col + x] * mod_p_inv);
-    A[curr_row*n_cols + curr_col + x] = positive_modulo(A[curr_row*n_cols + curr_col + x], (*ctx).prime_number);
-  }
+  // curr_col = curr_col + 1. Ensure to remove the (curr_row*n_cols + curr_col)-garbage
+  A[curr_row*n_cols + curr_col + x] -=\
+    (A[curr_row*n_cols + curr_col] * A[((*ctx).mod_p_pivot_seek_from_row-1)*n_cols + curr_col + x]);
+  A[curr_row*n_cols + curr_col + x] = positive_modulo(A[curr_row*n_cols + curr_col + x], (*ctx).prime_number);
 }
 
 __global__ void mod_p_exchange_rows(GaussianEliminationCtx *ctx, int *A, int n_rows, int n_cols, int curr_col) { 
   /*
-     Integer matrix routine. // TODO: fix pivot
+     Integer matrix routine.
   */
   int x = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -138,7 +136,8 @@ __global__ void mod_p_exchange_rows(GaussianEliminationCtx *ctx, int *A, int n_r
 
   tmp_input = A[n_cols*dst_row + curr_col + x];
 
-  A[n_cols*dst_row + curr_col + x] = A[n_cols*src_row + curr_col + x];
+  // mod_p_inverse for reduction purposes
+  A[n_cols*dst_row + curr_col + x] = A[n_cols*src_row + curr_col + x] * mod_p_inverse((*ctx).prime_number, mod_p_pivot_val);
   A[n_cols*src_row + curr_col + x] = tmp_input;
 }
 
@@ -157,9 +156,10 @@ __global__ void mod_p_seek_row_to_push(GaussianEliminationCtx *ctx, int *A, int 
 
   pivot_candidate_val = A[x * n_cols + curr_col];
 
-  if (pivot_candidate_val != 0) {
+  if (pivot_candidate_val % (*ctx).prime_number != 0) {
     if (atomicCAS(&((*ctx).mod_p_row_to_push), -1, x) == -1) {
       (*ctx).mod_p_pivot_seek_from_row += 1;
+      (*ctx).mod_p_pivot_val = pivot_candidate_val;
     }
   }
 }
