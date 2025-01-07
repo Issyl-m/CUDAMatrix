@@ -225,6 +225,8 @@ int main(int argc, char *argv[]) {
     cudaDeviceSynchronize();
   }
 
+  // TODO: backward substitution
+
   // Parse data 
 
   cudaMemcpy(h_M.data(), d_M, h_M_size, cudaMemcpyDeviceToHost);
