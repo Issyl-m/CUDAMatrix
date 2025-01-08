@@ -26,7 +26,7 @@ struct __align__(16) GaussianEliminationCtx {
   int mod_p_pivot_val; // TODO: possibly unused
 };
 
-// Kernels and devices
+// Kernels and devices TODO: separate routines for p >> 1, small primes and p = 2
 
 __device__ int positive_modulo(int i, int n) { 
   /*
