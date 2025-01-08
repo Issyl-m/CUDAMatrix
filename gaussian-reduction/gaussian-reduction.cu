@@ -100,7 +100,7 @@ __global__ void mod_p_gaussian_clean_column(GaussianEliminationCtx *__restrict__
 
 __global__ void mod_p_gaussian_elimination(GaussianEliminationCtx *__restrict__ ctx, int *__restrict__ A, int n_rows, int n_cols, int curr_col, int curr_row) { 
   /*
-    Integer matrix routine.
+    Integer matrix routine. TODO: improve for sparse matrices
   */
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   
