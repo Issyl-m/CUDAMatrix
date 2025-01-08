@@ -235,7 +235,9 @@ int main(int argc, char *argv[]) {
     int block_size;
     int num_blocks;
 
-    block_size = M_rows / DEFAULT_N_THREADS_PER_DIM + 1; // we could have threads outside the matrix                                   
+    // TODO: the number of threads depends on M_rows and/or M_cols
+
+    block_size = M_rows / DEFAULT_N_THREADS_PER_DIM + 1; // we could have threads outside the matrix
     num_blocks = M_rows / block_size + 1;
     mod_p_seek_row_to_push <<< num_blocks, DEFAULT_N_THREADS_PER_DIM >>> (d_ctx, d_M, M_rows, M_cols, j);
     cudaDeviceSynchronize();                         
