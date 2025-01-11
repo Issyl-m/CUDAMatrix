@@ -8,11 +8,9 @@ Licensed under the terms of the MIT License (see ./LICENSE).
 #include <cstdlib>
 #include <iostream>
 #include <vector>
-#include <algorithm> // tests
 
 using std::cout;
 using std::vector;
-using std::generate;
 
 // Constants
 
@@ -35,7 +33,7 @@ struct __align__(16) GaussianEliminationCtx {
   Mod p linear algebra routines for small primes (<MAX_INT)
   TODO:
   - Separate routines for p >> 1, small primes and p = 2
-  - Sparse matrix Gaussian elimination (TODO), multiplication (SELLP)
+  - Sparse matrix Gaussian elimination, multiplication
 */
 
 __device__ int positive_modulo(int i, int n) { 
@@ -98,29 +96,38 @@ __device__ int mod_p_inverse(int p, int a) {
   return positive_modulo(x_1, p);
 }
 
-__global__ void mod_p_gaussian_backward_reduction(GaussianEliminationCtx *__restrict__ ctx, int *__restrict__ A, int n_rows, int n_cols, int curr_col, int *__restrict__ pivot_locations) {
+__global__ void mod_p_gaussian_backward_substitution(GaussianEliminationCtx *__restrict__ ctx, int *__restrict__ A, int n_rows, int n_cols) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
-  int y = blockIdx.y * blockDim.y + threadIdx.y;
- 
-  int pivot_row = pivot_locations[curr_col];
   
-  if (x + 1 < curr_col || x + 1 >= n_cols || y >= pivot_row || pivot_row == -1) {
-    return;
-  }
-  
-  A[y * n_cols + x + 1] -= A[y * n_cols + curr_col] * A[pivot_row * n_cols + x + 1] * 1;
-}
-
-__global__ void mod_p_gaussian_backward_clean_column(GaussianEliminationCtx *__restrict__ ctx, int *__restrict__ A, int n_rows, int n_cols, int curr_col) {
-  int x = blockIdx.x * blockDim.x + threadIdx.x;
-
-  int pivot_row = (*ctx).pivot_locations[curr_col];
-
-  if (x >= pivot_row || pivot_row == -1 ) {
+  if (x >= n_cols + 1) {
     return;
   }
 
-  A[x*n_cols + curr_col] = 0;
+  bool zeroing = true;
+
+  int curr_row = -1;
+  int prime_number = (*ctx).prime_number;
+
+  for (int i = n_rows - 1; i >= 0; i--) {
+    if (A[i * (n_cols + 1) + x] % prime_number != 0) { 
+      for (int j = 0; j < n_cols + 1; j++) {
+        if (j == x)
+          continue;
+        zeroing &= (A[i * (n_cols + 1) + j + x] % prime_number == 0);
+      }
+      if (zeroing) 
+        curr_row = i;
+      else
+        return;
+      break;
+    }
+  }
+
+  if (zeroing and curr_row >= 0) {
+    for (int i = curr_row + 1; i >= 0; i--) {
+      A[i * (n_cols + 1) + x] = 0;
+    }
+  }
 }
 
 __global__ void mod_p_gaussian_clean_column(GaussianEliminationCtx *__restrict__ ctx, int *__restrict__ A, int n_rows, int n_cols, int curr_col) {
@@ -130,7 +137,7 @@ __global__ void mod_p_gaussian_clean_column(GaussianEliminationCtx *__restrict__
     return;
   }
 
-  A[x*n_cols + curr_col] = 0;
+  A[x*(n_cols+1) + curr_col] = 0;
 }
 
 __global__ void mod_p_gaussian_elimination(GaussianEliminationCtx *__restrict__ ctx, int *__restrict__ A, int n_rows, int n_cols, int curr_col) { 
@@ -151,7 +158,7 @@ __global__ void mod_p_gaussian_elimination(GaussianEliminationCtx *__restrict__ 
   A[curr_row*n_cols + curr_col + x + 1] -=\
     (A[curr_row*n_cols + curr_col] * A[((*ctx).mod_p_pivot_seek_from_row-1)*n_cols + curr_col + x + 1]);
   
-  A[curr_row*n_cols + curr_col + x + 1] = positive_modulo(A[curr_row*n_cols + curr_col + x + 1], (*ctx).prime_number); // TODO: performance, int size
+  // A[curr_row*n_cols + curr_col + x + 1] = positive_modulo(A[curr_row*n_cols + curr_col + x + 1], (*ctx).prime_number);
 }
 
 __global__ void mod_p_exchange_rows(GaussianEliminationCtx *__restrict__ ctx, int *__restrict__ A, int n_rows, int n_cols, int curr_col) { 
@@ -184,7 +191,7 @@ __global__ void mod_p_exchange_rows(GaussianEliminationCtx *__restrict__ ctx, in
   A[n_cols*src_row + curr_col + x] = tmp_input;
 }
 
-__global__ void mod_p_seek_row_to_push(GaussianEliminationCtx *__restrict__ ctx, int *__restrict__ A, int n_rows, int n_cols, int curr_col, int *__restrict__ pivot_locations) {
+__global__ void mod_p_seek_row_to_push(GaussianEliminationCtx *__restrict__ ctx, int *__restrict__ A, int n_rows, int n_cols, int curr_col) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
 
   int pivot_candidate_val;
@@ -195,14 +202,12 @@ __global__ void mod_p_seek_row_to_push(GaussianEliminationCtx *__restrict__ ctx,
 
   if (atomicCAS(&((*ctx).mod_p_curr_col), curr_col - 1, curr_col) == curr_col - 1) { // TODO: check performance        
     (*ctx).mod_p_row_to_push = -1;                                                                                                                                    
-    pivot_locations[curr_col] = -1;
   }
 
   pivot_candidate_val = A[x * n_cols + curr_col];
 
   if (pivot_candidate_val % (*ctx).prime_number != 0) { // TODO: slow for variable prime_number
     if (atomicCAS(&((*ctx).mod_p_row_to_push), -1, x) == -1) {
-      pivot_locations[curr_col] = (*ctx).mod_p_pivot_seek_from_row;
       (*ctx).mod_p_pivot_seek_from_row += 1;
       (*ctx).mod_p_pivot_val = pivot_candidate_val;
     }
@@ -220,7 +225,7 @@ __host__ void print_matrix(int prime_number, vector<int> &matrix, int n_rows, in
   
   for (int i = 0; i < n_rows; i++) {
     for (int j = 0; j < n_cols; j++) {
-      printf("%d\t\t", ((matrix[i*n_cols+j] % prime_number) + prime_number) % prime_number);
+      printf("%d\t\t", matrix[i*n_cols+j] % prime_number);
     }
     printf("\n");
   }
@@ -232,42 +237,30 @@ __host__ void print_matrix(int prime_number, vector<int> &matrix, int n_rows, in
 int main(int argc, char *argv[]) {
   // Initialize data: sample matrix 
 
-  size_t M_rows = 200; // 5x6
-  size_t M_cols = 200;
+  size_t M_rows = 5;
+  size_t M_cols = 6;
 
   int prime_number = 5;
 
-  vector<int> h_M(M_rows * M_cols, 1);
- 
-  generate(h_M.begin(), h_M.end(), [] {
-    static int i = 0;
-    int r = 0;
-    if (i % 200 + 30 <= i / 200) 
-      r = 1;
-    if (i % 200 == 0)
-      r = 0;
-    i++;
-    return r;
-  });
-
-  // h_M = {
-  //   1, 1, 1, 1, 1, 1,
-  //   0, 1, 1, 1, 1, 1,
-  //   0, 0, 1, 1, 1, 1,
-  //   0, 0, 0, 1, 1, 1,
-  //   0, 0, 0, 0, 1, 1,
-  // };
+  vector<int> h_M(M_rows * M_cols);
+  
+  h_M = {
+    1, 2, 0, 4, 5, 6,
+    0, 1, 0, 10, 11, 12,
+    0, 0, 3, 0, 0, 0,
+    0, 0, 0, 4, 5, 6,
+    0, 0, 0, 0, 0, 6
+  };
 
   print_matrix(prime_number, h_M, M_rows, M_cols);
 
   // Device TODO: split into separate procedures
 
   int h_M_size = M_rows*M_cols*sizeof(int);  
-  int *d_M, *d_pivot_locations;
+  int *d_M;
   GaussianEliminationCtx *d_ctx;
 
   cudaMalloc(&d_M, h_M_size);
-  cudaMalloc(&d_pivot_locations, sizeof(int)*M_cols);
   cudaMalloc(&d_ctx, sizeof(GaussianEliminationCtx));
 
   GaussianEliminationCtx h_ctx;
@@ -288,7 +281,7 @@ int main(int argc, char *argv[]) {
     dim3 num_blocks_2d((M_cols - j - 1) / DEFAULT_N_THREADS_PER_DIM + 1, M_rows / DEFAULT_N_THREADS_PER_DIM + 1);
 
     num_blocks = M_rows / DEFAULT_N_THREADS_PER_DIM + 1;
-    mod_p_seek_row_to_push <<< num_blocks, DEFAULT_N_THREADS_PER_DIM >>> (d_ctx, d_M, M_rows, M_cols, j, d_pivot_locations);
+    mod_p_seek_row_to_push <<< num_blocks, DEFAULT_N_THREADS_PER_DIM >>> (d_ctx, d_M, M_rows, M_cols, j);
     cudaDeviceSynchronize();                         
 
     num_blocks = M_cols / DEFAULT_N_THREADS_PER_DIM + 1;               
@@ -303,23 +296,15 @@ int main(int argc, char *argv[]) {
     cudaDeviceSynchronize();
   }
 
-  for (int i = 0; i < M_cols; i++) {
-    dim3 num_blocks_2d((M_cols - i - 1) / DEFAULT_N_THREADS_PER_DIM + 1, M_rows / DEFAULT_N_THREADS_PER_DIM + 1);
-
-    mod_p_gaussian_backward_reduction <<< num_blocks_2d, num_threads_2d >>> (d_ctx, d_M, M_rows, M_rows, i, d_pivot_locations);
-    cudaDeviceSynchronize();
-
-    num_blocks = M_rows / DEFAULT_N_THREADS_PER_DIM + 1;
-    mod_p_gaussian_backward_clean_column <<< num_blocks, DEFAULT_N_THREADS_PER_DIM >>> (d_ctx, d_M, M_rows, M_rows, i); // to avoid more flow control
-    cudaDeviceSynchronize();
-  }
+  num_blocks = M_cols / DEFAULT_N_THREADS_PER_DIM + 1;
+  mod_p_gaussian_backward_substitution <<< num_blocks, DEFAULT_N_THREADS_PER_DIM >>> (d_ctx, d_M, M_rows, M_rows);
+  cudaDeviceSynchronize();
   
   // Parse data 
 
   cudaMemcpy(h_M.data(), d_M, h_M_size, cudaMemcpyDeviceToHost);
   
   cudaFree(d_M);
-  cudaFree(d_pivot_locations);
   cudaFree(d_ctx);
 
   print_matrix(prime_number, h_M, M_rows, M_cols);
