@@ -9,6 +9,7 @@ Licensed under the terms of the MIT License (see ./LICENSE).
 #include <iostream>
 #include <vector>
 #include <algorithm> // tests
+#include <cmath> // tests
 
 using std::cout;
 using std::vector;
@@ -104,17 +105,18 @@ __global__ void mod_p_gaussian_backward_reduction(GaussianEliminationCtx *__rest
  
   int pivot_row = pivot_locations[curr_col];
   
-  if (x + 1 < curr_col || x + 1 >= n_cols || y >= pivot_row || pivot_row == -1) {
+  if (curr_col + x + 1 >= n_cols || y >= pivot_row || pivot_row == -1) { // 
     return;
   }
   
-  A[y * n_cols + x + 1] -= A[y * n_cols + curr_col] * A[pivot_row * n_cols + x + 1] * 1;
+  A[y * n_cols + curr_col + x + 1] -= A[y * n_cols + curr_col] * A[pivot_row * n_cols + curr_col + x + 1] * 1;
+  A[y * n_cols + curr_col + x + 1] = positive_modulo(A[y * n_cols + curr_col + x + 1], (*ctx).prime_number); // TODO: performance, int size
 }
 
-__global__ void mod_p_gaussian_backward_clean_column(GaussianEliminationCtx *__restrict__ ctx, int *__restrict__ A, int n_rows, int n_cols, int curr_col) {
+__global__ void mod_p_gaussian_backward_clean_column(GaussianEliminationCtx *__restrict__ ctx, int *__restrict__ A, int n_rows, int n_cols, int curr_col, int *__restrict__ pivot_locations) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
 
-  int pivot_row = (*ctx).pivot_locations[curr_col];
+  int pivot_row = pivot_locations[curr_col];
 
   if (x >= pivot_row || pivot_row == -1 ) {
     return;
@@ -232,30 +234,37 @@ __host__ void print_matrix(int prime_number, vector<int> &matrix, int n_rows, in
 int main(int argc, char *argv[]) {
   // Initialize data: sample matrix 
 
-  size_t M_rows = 200; // 5x6
-  size_t M_cols = 200;
+  // size_t M_rows = 5; // 5x6
+  // size_t M_cols = 6;
+
+  size_t M_rows = 40000; // 5x6
+  size_t M_cols = 80000;
 
   int prime_number = 5;
 
   vector<int> h_M(M_rows * M_cols, 1);
- 
+
   generate(h_M.begin(), h_M.end(), [] {
     static int i = 0;
     int r = 0;
-    if (i % 200 + 30 <= i / 200) 
-      r = 1;
-    if (i % 200 == 0)
+
+    int row = i / 40000;
+    int col = i % 80000;
+
+    if (i % 7 < 5 || i % 29 > 20) 
+      r = (2 + i) % 5;
+    if (col <= 10 || row > 40000 || row < 1)
       r = 0;
     i++;
     return r;
   });
-
+  
   // h_M = {
-  //   1, 1, 1, 1, 1, 1,
-  //   0, 1, 1, 1, 1, 1,
-  //   0, 0, 1, 1, 1, 1,
-  //   0, 0, 0, 1, 1, 1,
-  //   0, 0, 0, 0, 1, 1,
+  //    0, 0, 2, 3, 4, 3,
+  //    0, 2, 3, 4, 0, 3,
+  //    0, 3, 4, 0, 1, 3,
+  //    0, 4, 0, 1, 2, 3,
+  //    0, 0, 1, 2, 3, 3,
   // };
 
   print_matrix(prime_number, h_M, M_rows, M_cols);
@@ -299,18 +308,18 @@ int main(int argc, char *argv[]) {
     cudaDeviceSynchronize();
     
     num_blocks = M_rows / DEFAULT_N_THREADS_PER_DIM + 1;
-    mod_p_gaussian_clean_column <<< num_blocks, DEFAULT_N_THREADS_PER_DIM >>> (d_ctx, d_M, M_rows, M_rows, j);
+    mod_p_gaussian_clean_column <<< num_blocks, DEFAULT_N_THREADS_PER_DIM >>> (d_ctx, d_M, M_rows, M_cols, j);
     cudaDeviceSynchronize();
   }
 
   for (int i = 0; i < M_cols; i++) {
     dim3 num_blocks_2d((M_cols - i - 1) / DEFAULT_N_THREADS_PER_DIM + 1, M_rows / DEFAULT_N_THREADS_PER_DIM + 1);
 
-    mod_p_gaussian_backward_reduction <<< num_blocks_2d, num_threads_2d >>> (d_ctx, d_M, M_rows, M_rows, i, d_pivot_locations);
+    mod_p_gaussian_backward_reduction <<< num_blocks_2d, num_threads_2d >>> (d_ctx, d_M, M_rows, M_cols, i, d_pivot_locations);
     cudaDeviceSynchronize();
 
     num_blocks = M_rows / DEFAULT_N_THREADS_PER_DIM + 1;
-    mod_p_gaussian_backward_clean_column <<< num_blocks, DEFAULT_N_THREADS_PER_DIM >>> (d_ctx, d_M, M_rows, M_rows, i); // to avoid more flow control
+    mod_p_gaussian_backward_clean_column <<< num_blocks, DEFAULT_N_THREADS_PER_DIM >>> (d_ctx, d_M, M_rows, M_cols, i, d_pivot_locations); // to avoid more flow control
     cudaDeviceSynchronize();
   }
   
