@@ -9,7 +9,6 @@ Licensed under the terms of the MIT License (see ./LICENSE).
 #include <iostream>
 #include <vector>
 #include <algorithm> // tests
-#include <cmath> // tests
 
 using std::cout;
 using std::vector;
@@ -105,12 +104,13 @@ __global__ void mod_p_gaussian_backward_reduction(GaussianEliminationCtx *__rest
  
   int pivot_row = pivot_locations[curr_col];
   
-  if (curr_col + x + 1 >= n_cols || y >= pivot_row || pivot_row == -1) { // 
+  if (curr_col + x + 1 >= n_cols || y >= pivot_row || pivot_row == -1) { //
     return;
   }
   
-  A[y * n_cols + curr_col + x + 1] -= A[y * n_cols + curr_col] * A[pivot_row * n_cols + curr_col + x + 1] * 1;
-  A[y * n_cols + curr_col + x + 1] = positive_modulo(A[y * n_cols + curr_col + x + 1], (*ctx).prime_number); // TODO: performance, int size
+  int curr_entry = A[y * n_cols + curr_col + x + 1];
+  curr_entry -= A[y * n_cols + curr_col] * A[pivot_row * n_cols + curr_col + x + 1] * 1;
+  A[y * n_cols + curr_col + x + 1] = positive_modulo(curr_entry, (*ctx).prime_number); // TODO: performance, int size
 }
 
 __global__ void mod_p_gaussian_backward_clean_column(GaussianEliminationCtx *__restrict__ ctx, int *__restrict__ A, int n_rows, int n_cols, int curr_col, int *__restrict__ pivot_locations) {
@@ -142,18 +142,19 @@ __global__ void mod_p_gaussian_elimination(GaussianEliminationCtx *__restrict__ 
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int curr_row = blockIdx.y * blockDim.y + threadIdx.y;
   
+  int mod_p_pivot_seek_from_row = (*ctx).mod_p_pivot_seek_from_row;
+
   // (*ctx).mod_p_row_to_push == -1: zero column
-  if (curr_row <= (*ctx).mod_p_pivot_seek_from_row-1 || \
+  if (curr_row <= mod_p_pivot_seek_from_row-1 || \
       curr_row >= n_rows || \
       curr_col + x + 1 >= n_cols || \
       (*ctx).mod_p_row_to_push == -1) {
     return;
   }
- 
-  A[curr_row*n_cols + curr_col + x + 1] -=\
-    (A[curr_row*n_cols + curr_col] * A[((*ctx).mod_p_pivot_seek_from_row-1)*n_cols + curr_col + x + 1]);
-  
-  A[curr_row*n_cols + curr_col + x + 1] = positive_modulo(A[curr_row*n_cols + curr_col + x + 1], (*ctx).prime_number); // TODO: performance, int size
+
+  int curr_entry = A[curr_row*n_cols + curr_col + x + 1];
+  curr_entry -= (A[curr_row*n_cols + curr_col] * A[(mod_p_pivot_seek_from_row-1)*n_cols + curr_col + x + 1]) * 1;
+  A[curr_row*n_cols + curr_col + x + 1] = positive_modulo(curr_entry, (*ctx).prime_number); // TODO: performance, int size
 }
 
 __global__ void mod_p_exchange_rows(GaussianEliminationCtx *__restrict__ ctx, int *__restrict__ A, int n_rows, int n_cols, int curr_col) { 
