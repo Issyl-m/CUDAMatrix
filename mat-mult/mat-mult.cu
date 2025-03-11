@@ -17,7 +17,7 @@ using std::generate;
 // Constants
 
 const int DEFAULT_N_THREADS_PER_DIM = 32; // max 1024 per block
-const int DEFAULT_SHARED_MEM = 32*32 * 4 * 2; // 32768 bytes
+const int DEFAULT_SHARED_MEM = 32*32 * 2; // 32768 bytes
 
 
 // Kernels and devices 
@@ -33,63 +33,14 @@ __device__ int positive_modulo(int i, int n) {
   return (i % n + n) % n;
 }
 
-__device__ int mod_2_inverse(int a) {
-  return ((a & 0x00000001) << 1) - 1; // Output: -1 if error
-}
-
-__device__ int mod_3_inverse(int a) {
-  int b = a % 3;
-  if (b == 0) return -1;
-  return b;
-}
-
-__device__ int mod_p_inverse(int p, int a) {
-  /*
-    Extended Euclidean division
-    Mod p multiplicative inverse
-    Output: x_1 = a^{-1}
-  */
-  int u = a;
-  int v = p;
-  
-  if (p == 2)
-    return mod_2_inverse(a);
-
-  if (p == 3)
-    return mod_3_inverse(a);
-
-  if (u % v == 0) {
-    return -1;
-  }
-
-  u = positive_modulo(a, p);
-  
-  int x_1 = 1;
-  int x_2 = 0;
-  
-  while (u != 1) {
-    int q = v/u;
-    int r = v - q*u;
-    int x = x_2 - q*x_1;
-
-    v = u;
-    u = r;
-    
-    x_2 = x_1;
-    x_1 = x;
-  }
-
-  return positive_modulo(x_1, p);
-}
-
 __global__ void mod_p_matrix_multiplication(int prime_number, int *__restrict__ M, int M_rows, int M_cols, int *__restrict__ N, int N_rows, int N_cols, int *O) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
 
   int output = 0;
 
-  __shared__ int s_M[SHMEM_SIZE];
-  __shared__ int s_N[SHMEM_SIZE];
+  __shared__ int s_M[DEFAULT_SHARED_MEM];
+  __shared__ int s_N[DEFAULT_SHARED_MEM];
 
   if (x >= M_rows || y >= N_cols) {
     return;
@@ -97,7 +48,7 @@ __global__ void mod_p_matrix_multiplication(int prime_number, int *__restrict__ 
 
   for (int block_num = 0; block_num < M_cols / (DEFAULT_N_THREADS_PER_DIM * DEFAULT_N_THREADS_PER_DIM); block_num++) {
     int i = threadIdx.x * DEFAULT_N_THREADS_PER_DIM + threadIdx.y;
-    int j = block_num * DEFAULT_N_THREADS_PER_DIM * DEFAULT_N_THREADS_PER_DIM + i
+    int j = block_num * DEFAULT_N_THREADS_PER_DIM * DEFAULT_N_THREADS_PER_DIM + i;
 
     if (j >= M_cols) {
       s_M[i] = 0;
