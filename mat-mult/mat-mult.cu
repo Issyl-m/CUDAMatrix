@@ -61,7 +61,7 @@ __global__ void mod_p_matrix_multiplication(int prime_number, int *__restrict__ 
     __syncthreads();
     
     for (int k = 0; k < DEFAULT_N_THREADS_PER_DIM*DEFAULT_N_THREADS_PER_DIM; k++) {
-      output = positive_modulo(prime_number, output + s_M[i] * s_N[i]);
+      output = positive_modulo(prime_number, output + s_M[k] * s_N[k]);
     }
   }
 
