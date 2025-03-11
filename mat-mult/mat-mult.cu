@@ -39,8 +39,8 @@ __global__ void mod_p_matrix_multiplication(int prime_number, int *__restrict__ 
 
   int output = 0;
 
-  __shared__ int s_M[DEFAULT_SHARED_MEM];
-  __shared__ int s_N[DEFAULT_SHARED_MEM];
+  __shared__ int __align__(8) s_M[DEFAULT_SHARED_MEM];
+  __shared__ int __align__(8) s_N[DEFAULT_SHARED_MEM];
 
   if (x >= M_rows || y >= N_cols) {
     return;
@@ -63,6 +63,8 @@ __global__ void mod_p_matrix_multiplication(int prime_number, int *__restrict__ 
     for (int k = 0; k < DEFAULT_N_THREADS_PER_DIM*DEFAULT_N_THREADS_PER_DIM; k++) {
       output = positive_modulo(prime_number, output + s_M[k] * s_N[k]);
     }
+
+    __syncthreads();
   }
 
   O[x * N_cols + y] = output;
