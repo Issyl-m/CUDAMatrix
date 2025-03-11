@@ -86,13 +86,17 @@ __global__ void mod_p_matrix_multiplication(int prime_number, int *__restrict__ 
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
 
+  int output = 0;
+
   if (x >= M_rows || y >= N_cols) {
     return;
   }
 
   for (int i = 0; i < M_cols; i++) { // TODO: i >> 1: shared memory
-    O[x * N_cols + y] = positive_modulo(prime_number, O[x * N_cols + y] + M[x * M_cols + i] * N[i * N_cols + y]);
+    output = positive_modulo(prime_number, O[x * N_cols + y] + M[x * M_cols + i] * N[i * N_cols + y]);
   }
+
+  O[x * N_cols + y] = output;
 }
 
 // Host utils 
