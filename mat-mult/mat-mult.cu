@@ -88,12 +88,30 @@ __global__ void mod_p_matrix_multiplication(int prime_number, int *__restrict__ 
 
   int output = 0;
 
+  __shared__ int s_M[SHMEM_SIZE];
+  __shared__ int s_N[SHMEM_SIZE];
+
   if (x >= M_rows || y >= N_cols) {
     return;
   }
 
-  for (int i = 0; i < M_cols; i++) { // TODO: i >> 1: shared memory
-    output = positive_modulo(prime_number, O[x * N_cols + y] + M[x * M_cols + i] * N[i * N_cols + y]);
+  for (int block_num = 0; block_num < M_cols / (DEFAULT_N_THREADS_PER_DIM * DEFAULT_N_THREADS_PER_DIM); block_num++) {
+    int i = threadIdx.x * DEFAULT_N_THREADS_PER_DIM + threadIdx.y;
+    int j = block_num * DEFAULT_N_THREADS_PER_DIM * DEFAULT_N_THREADS_PER_DIM + i
+
+    if (j >= M_cols) {
+      s_M[i] = 0;
+      s_N[i] = 0;
+    } else {
+      s_M[i] = M[x * M_cols + j];
+      s_N[i] = N[j * N_cols + y];
+    }
+
+    __syncthreads();
+    
+    for (int k = 0; k < DEFAULT_N_THREADS_PER_DIM*DEFAULT_N_THREADS_PER_DIM; k++) {
+      output = positive_modulo(prime_number, output + s_M[i] * s_N[i]);
+    }
   }
 
   O[x * N_cols + y] = output;
