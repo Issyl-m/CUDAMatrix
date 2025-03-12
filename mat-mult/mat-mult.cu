@@ -22,15 +22,15 @@ const int DEFAULT_SHARED_MEM = 32*32 * 2; // 32768 bytes
 
 // Kernels and devices 
 
-__device__ int positive_modulo(int i, int n) { 
+__device__ int positive_modulo(int i, int n_mod) { 
   /*
     Input: i arbitrary, n: modulus, n > 0
     Output: positive i % n representative
   */
-  if (n == 2) {
+  if (n_mod == 2) {
     return i & 0x00000001;
   }
-  return (i % n + n) % n;
+  return (i % n_mod + n_mod) % n_mod;
 }
 
 __global__ void mod_p_matrix_multiplication(int prime_number, int *__restrict__ M, int M_rows, int M_cols, int *__restrict__ N, int N_rows, int N_cols, int *O) {
@@ -42,34 +42,37 @@ __global__ void mod_p_matrix_multiplication(int prime_number, int *__restrict__ 
   __shared__ int __align__(8) s_M[DEFAULT_SHARED_MEM];
   __shared__ int __align__(8) s_N[DEFAULT_SHARED_MEM];
 
-  if (x >= M_rows || y >= N_cols) {
-    return;
-  }
-
-  for (int block_num = 0; block_num <= M_cols / DEFAULT_N_THREADS_PER_DIM; block_num++) {
+  for (int block_num = 0; block_num <= (M_cols - 1) / DEFAULT_N_THREADS_PER_DIM; block_num++) {
     int i = threadIdx.x * DEFAULT_N_THREADS_PER_DIM + threadIdx.y;
     int j = block_num * DEFAULT_N_THREADS_PER_DIM + threadIdx.y;
     int k = block_num * DEFAULT_N_THREADS_PER_DIM + threadIdx.x;
 
-    if (j >= M_cols) {
-      s_M[i] = 0;
-    } else {
+    s_M[i] = 0;
+    s_N[i] = 0;
+    
+    if (j < M_cols) {
       s_M[i] = M[x * M_cols + j];
     } 
 
-    if (k >= M_cols) {
-      s_N[i] = 0;
-    } else {
+    if (k < N_rows) {
       s_N[i] = N[k * N_cols + y];
-    } 
-
-    __syncthreads();
-    
-    for (int k = 0; k < DEFAULT_N_THREADS_PER_DIM; k++) {
-      output = positive_modulo(prime_number, output + s_M[threadIdx.x * DEFAULT_N_THREADS_PER_DIM + k] * s_N[k * DEFAULT_N_THREADS_PER_DIM + threadIdx.y]);
     }
 
     __syncthreads();
+
+    for (int k = 0; k < DEFAULT_N_THREADS_PER_DIM; k++) {
+      if (x >= M_rows || y >= N_cols) {
+        break;
+      }
+
+      output = positive_modulo(output + s_M[threadIdx.x * DEFAULT_N_THREADS_PER_DIM + k] * s_N[k * DEFAULT_N_THREADS_PER_DIM + threadIdx.y], prime_number);
+    }
+
+    __syncthreads();
+  }
+
+  if (x >= M_rows || y >= N_cols) {
+    return;
   }
 
   O[x * N_cols + y] = output;
@@ -101,8 +104,8 @@ int main(int argc, char *argv[]) {
   // size_t M_rows = 5; // 5x6
   // size_t M_cols = 6;
 
-  size_t M_rows = 4; // 5x6
-  size_t M_cols = 8;
+  size_t M_rows = 41; // 5x6
+  size_t M_cols = 81;
 
   int prime_number = 5;
 
@@ -112,20 +115,21 @@ int main(int argc, char *argv[]) {
     static int i = 0;
     int r = 0;
 
-    int row = i / 8;
-    int col = i % 8;
+    int row = i / 81;
+    int col = i % 81;
 
     if (row == col) {
-      r = 2;
+      r = 1*row;
     } else {
       r = 0;
     }
     i++;
+    r = i + 2*row*row - 2;
     return r;
   });
 
-  size_t N_rows = 8; // 5x6
-  size_t N_cols = 4;
+  size_t N_rows = 81; // 5x6
+  size_t N_cols = 41;
 
   vector<int> h_N(N_rows * N_cols, 1);
 
@@ -133,14 +137,15 @@ int main(int argc, char *argv[]) {
     static int i = 0;
     int r = 0;
 
-    int row = i / 4;
-    int col = i % 4;
+    int row = i / 41;
+    int col = i % 41;
 
-    if (row == col) {
-      r = 3;
-    } else {
-      r = 0;
-    }
+    // if (row == col) {
+    //   r = 1;
+    // } else {
+    //   r = 0;
+    // }
+    r = i + row + 3*col + 2;
     i++;
     return r;
   });
@@ -157,7 +162,7 @@ int main(int argc, char *argv[]) {
 
   print_matrix(prime_number, h_M, M_rows, M_cols);
   print_matrix(prime_number, h_N, N_rows, N_cols);
-  print_matrix(prime_number, h_O, M_rows, N_cols);
+  // print_matrix(prime_number, h_O, M_rows, N_cols);
 
   // Device TODO: split into separate procedures
 
@@ -201,3 +206,4 @@ int main(int argc, char *argv[]) {
 
   return 0;
 }
+
