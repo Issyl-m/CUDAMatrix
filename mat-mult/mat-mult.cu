@@ -46,9 +46,9 @@ __global__ void mod_p_matrix_multiplication(int prime_number, int *__restrict__ 
     return;
   }
 
-  for (int block_num = 0; block_num < M_cols / (DEFAULT_N_THREADS_PER_DIM * DEFAULT_N_THREADS_PER_DIM); block_num++) {
+  for (int block_num = 0; block_num <= M_cols / DEFAULT_N_THREADS_PER_DIM; block_num++) {
     int i = threadIdx.x * DEFAULT_N_THREADS_PER_DIM + threadIdx.y;
-    int j = block_num * DEFAULT_N_THREADS_PER_DIM * DEFAULT_N_THREADS_PER_DIM + i;
+    int j = block_num * DEFAULT_N_THREADS_PER_DIM + threadIdx.y;
 
     if (j >= M_cols) {
       s_M[i] = 0;
@@ -60,8 +60,8 @@ __global__ void mod_p_matrix_multiplication(int prime_number, int *__restrict__ 
 
     __syncthreads();
     
-    for (int k = 0; k < DEFAULT_N_THREADS_PER_DIM*DEFAULT_N_THREADS_PER_DIM; k++) {
-      output = positive_modulo(prime_number, output + s_M[k] * s_N[k]);
+    for (int k = 0; k < DEFAULT_N_THREADS_PER_DIM; k++) {
+      output = positive_modulo(prime_number, output + s_M[threadIdx.x * DEFAULT_N_THREADS_PER_DIM + k] * s_N[k * DEFAULT_N_THREADS_PER_DIM + threadIdx.y]);
     }
 
     __syncthreads();
